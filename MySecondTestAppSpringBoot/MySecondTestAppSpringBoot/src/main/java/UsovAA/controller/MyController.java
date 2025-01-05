@@ -1,5 +1,7 @@
 package UsovAA.controller;
+
 import UsovAA.exception.UnsupportedCodeException;
+import UsovAA.exception.ValidationFailedException;
 import UsovAA.model.*;
 import UsovAA.service.*;
 import UsovAA.util.DateTimeUtil;
@@ -10,14 +12,8 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.BindingResult;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
-import UsovAA.service.ValidationService;
-import UsovAA.exception.ValidationFailedException;
+import org.springframework.web.bind.annotation.*;
 
-import java.text.SimpleDateFormat;
 import java.util.Date;
 
 @Slf4j
@@ -49,42 +45,62 @@ public class MyController {
         // Устанавливаем текущее время в поле systemTime
         request.setSystemTime(DateTimeUtil.getCustomFormat().format(new Date()));
 
-        Response response = Response.builder()
-                .uid(request.getUid())
-                .operationUid(request.getOperationUid())
-                .systemTime(request.getSystemTime())
-                .code(Codes.SUCCESS)
-                .errorCode(ErrorCodes.EMPTY)
-                .errorMessage(ErrorMessages.EMPTY)
-                .build();
-
+        // Создаем начальный ответ
+        Response response = createResponse(request, Codes.SUCCESS, ErrorCodes.EMPTY, ErrorMessages.EMPTY);
         log.info("Initialized response: {}", response);
 
         try {
             validationService.isValid(bindingResult);
         } catch (ValidationFailedException e) {
-            log.error("Validation failed: {}", e.getMessage());
-            response.setCode(Codes.FAILED);
-            response.setErrorCode(ErrorCodes.VALIDATION_EXCEPTION);
-            response.setErrorMessage(ErrorMessages.VALIDATION);
-            return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+            return handleValidationException(response, e);
         } catch (Exception e) {
-            log.error("Unexpected error: {}", e.getMessage(), e);
-            response.setCode(Codes.FAILED);
-            response.setErrorCode(ErrorCodes.UNKNOWN_EXCEPTION);
-            response.setErrorMessage(ErrorMessages.UNKNOWN);
-            return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);
+            return handleUnexpectedException(response, e);
         }
 
-        // Модифицируем source
+        // Модифицируем source и systemName
         modifySourceRequestService.modify(request);
-
-        // Модифицируем systemName и отправляем запрос в Сервис 2
         modifySystemNameRequestService.modify(request);
 
+        // Модифицируем ответ
         modifyResponseService.modify(response);
         log.info("Modified response: {}", response);
 
         return new ResponseEntity<>(response, HttpStatus.OK);
+    }
+
+    /**
+     * Создает объект Response на основе запроса и параметров.
+     */
+    private Response createResponse(Request request, Codes code, ErrorCodes errorCode, ErrorMessages errorMessage) {
+        return Response.builder()
+                .uid(request.getUid())
+                .operationUid(request.getOperationUid())
+                .systemTime(request.getSystemTime())
+                .code(code)
+                .errorCode(errorCode)
+                .errorMessage(errorMessage)
+                .build();
+    }
+
+    /**
+     * Обрабатывает исключение ValidationFailedException.
+     */
+    private ResponseEntity<Response> handleValidationException(Response response, ValidationFailedException e) {
+        log.error("Validation failed: {}", e.getMessage());
+        response.setCode(Codes.FAILED);
+        response.setErrorCode(ErrorCodes.VALIDATION_EXCEPTION);
+        response.setErrorMessage(ErrorMessages.VALIDATION);
+        return new ResponseEntity<>(response, HttpStatus.BAD_REQUEST);
+    }
+
+    /**
+     * Обрабатывает непредвиденные исключения.
+     */
+    private ResponseEntity<Response> handleUnexpectedException(Response response, Exception e) {
+        log.error("Unexpected error: {}", e.getMessage(), e);
+        response.setCode(Codes.FAILED);
+        response.setErrorCode(ErrorCodes.UNKNOWN_EXCEPTION);
+        response.setErrorMessage(ErrorMessages.UNKNOWN);
+        return new ResponseEntity<>(response, HttpStatus.INTERNAL_SERVER_ERROR);
     }
 }
